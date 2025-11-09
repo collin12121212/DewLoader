@@ -36,7 +36,7 @@ jobs:
         path: dist/StardewModLoader.exe
 
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13  # Use Intel-based runner for better compatibility
     
     steps:
     - uses: actions/checkout@v4
@@ -54,10 +54,8 @@ jobs:
     
     - name: Build macOS executable
       run: |
-        # Build universal binary for both Intel and Apple Silicon
-        pyinstaller --onefile --windowed --name "StardewModLoader" --target-arch universal2 main.py
-      env:
-        ARCHFLAGS: "-arch x86_64 -arch arm64"
+        # Build for x86_64 (will work on Intel and Apple Silicon via Rosetta 2)
+        pyinstaller --onefile --windowed --name "StardewModLoader" main.py
     
     - name: Create DMG (optional)
       run: |
