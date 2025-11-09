@@ -1,0 +1,16 @@
+# Build script for creating standalone executable
+# Run this to create a single .exe file with all dependencies bundled
+
+# Windows build command:
+# pyinstaller --onefile --windowed --name "StardewModLoader" main.py
+
+# macOS build command:
+# pyinstaller --onefile --windowed --name "StardewModLoader" main.py
+
+# The --onefile flag creates a single executable
+# The --windowed flag removes the console window (GUI only)
+# The executable will be in the dist/ folder
+
+# Optional: Add an icon
+# Windows: pyinstaller --onefile --windowed --name "StardewModLoader" --icon=icon.ico main.py
+# macOS: pyinstaller --onefile --windowed --name "StardewModLoader" --icon=icon.icns main.py
