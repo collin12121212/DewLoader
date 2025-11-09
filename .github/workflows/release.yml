@@ -41,7 +41,7 @@ jobs:
     - name: Build executable (macOS)
       if: matrix.os == 'macos-latest'
       run: |
-        pyinstaller --onefile --windowed --name "StardewModLoader" main.py
+        pyinstaller --onefile --windowed --name "StardewModLoader" --target-arch universal2 main.py
         cd dist
         zip -r StardewModLoader.app.zip StardewModLoader.app
         cd ..
