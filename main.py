@@ -273,7 +273,8 @@ class StardewModLoader:
             padx=40,
             pady=20,
             font=('Segoe UI', 12, 'bold'),
-            cursor='hand2'
+            cursor='hand2',
+            highlightthickness=0
         )
         browse_btn.pack(fill=tk.BOTH, expand=True)
         
@@ -316,10 +317,18 @@ class StardewModLoader:
             highlightcolor=self.accent_color,
             borderwidth=0,
             font=('Segoe UI', 9),
-            activestyle='none'  # Prevents default selection style conflicts
+            activestyle='none',  # Prevents default selection style conflicts
+            selectmode=tk.EXTENDED  # Enable multi-select
         )
         self.mods_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.mods_listbox.yview)
+        
+        # Bind keyboard shortcuts for select all
+        # Windows/Linux: Ctrl+A, macOS: Cmd+A
+        if platform.system() == "Darwin":
+            self.mods_listbox.bind('<Command-a>', self.select_all_mods)
+        else:
+            self.mods_listbox.bind('<Control-a>', self.select_all_mods)
         
         # Store mod data for color coding
         self.mod_data = []
@@ -333,7 +342,7 @@ class StardewModLoader:
             btn_frame, text="Enable/Disable", command=self.toggle_mod,
             bg=self.bg_tertiary, fg=self.fg_color, activebackground=self.highlight_color,
             activeforeground='white', relief=tk.FLAT, borderwidth=0, padx=12, pady=6,
-            font=('Segoe UI', 9), cursor='hand2'
+            font=('Segoe UI', 9), cursor='hand2', highlightthickness=0
         )
         toggle_btn.pack(side=tk.LEFT, padx=(0, 5))
         
@@ -341,7 +350,7 @@ class StardewModLoader:
             btn_frame, text="Delete", command=self.delete_mod,
             bg=self.bg_tertiary, fg=self.fg_color, activebackground=self.highlight_color,
             activeforeground='white', relief=tk.FLAT, borderwidth=0, padx=12, pady=6,
-            font=('Segoe UI', 9), cursor='hand2'
+            font=('Segoe UI', 9), cursor='hand2', highlightthickness=0
         )
         delete_btn.pack(side=tk.LEFT, padx=(0, 5))
         
@@ -349,9 +358,17 @@ class StardewModLoader:
             btn_frame, text="Open Mods Folder", command=self.open_mods_folder,
             bg=self.bg_tertiary, fg=self.fg_color, activebackground=self.highlight_color,
             activeforeground='white', relief=tk.FLAT, borderwidth=0, padx=12, pady=6,
-            font=('Segoe UI', 9), cursor='hand2'
+            font=('Segoe UI', 9), cursor='hand2', highlightthickness=0
         )
-        open_btn.pack(side=tk.LEFT)
+        open_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        downloads_btn = tk.Button(
+            btn_frame, text="Open Downloads", command=self.open_downloads_folder,
+            bg=self.bg_tertiary, fg=self.fg_color, activebackground=self.highlight_color,
+            activeforeground='white', relief=tk.FLAT, borderwidth=0, padx=12, pady=6,
+            font=('Segoe UI', 9), cursor='hand2', highlightthickness=0
+        )
+        downloads_btn.pack(side=tk.LEFT)
         
         # Status bar
         self.status_var = tk.StringVar(value="Ready")
@@ -668,19 +685,25 @@ class StardewModLoader:
         try:
             # Only refresh if the mods path exists
             if self.mods_path.exists():
-                # Store current selection
-                current_selection = self.mods_listbox.curselection()
-                current_item = None
-                if current_selection:
-                    current_item = self.mods_listbox.get(current_selection[0])
+                # Store all current selections (not just first one)
+                current_selections = self.mods_listbox.curselection()
+                selected_items = []
+                for idx in current_selections:
+                    selected_items.append(self.mods_listbox.get(idx))
+                
+                # Store the current scroll position
+                scroll_position = self.mods_listbox.yview()
                 
                 # Refresh the list
                 self.refresh_mods_list()
                 
-                # Restore selection if possible
-                if current_item:
+                # Restore scroll position
+                self.mods_listbox.yview_moveto(scroll_position[0])
+                
+                # Restore all selections
+                for selected_item in selected_items:
                     for i in range(self.mods_listbox.size()):
-                        if self.mods_listbox.get(i) == current_item:
+                        if self.mods_listbox.get(i) == selected_item:
                             self.mods_listbox.selection_set(i)
                             break
         except:
@@ -689,21 +712,35 @@ class StardewModLoader:
         # Schedule next refresh in 3 seconds
         self.root.after(3000, self.auto_refresh_mods)
     
+    def select_all_mods(self, event=None):
+        """Select all mods in the list"""
+        self.mods_listbox.select_set(0, tk.END)
+        return 'break'  # Prevent default behavior
+    
     def toggle_mod(self):
-        """Enable or disable selected mod"""
+        """Enable or disable selected mod(s)"""
         selection = self.mods_listbox.curselection()
         
         if not selection:
-            messagebox.showwarning("No Selection", "Please select a mod to enable/disable.")
+            messagebox.showwarning("No Selection", "Please select one or more mods to enable/disable.")
             return
         
-        mod_name = self.mods_listbox.get(selection[0])
+        # Process each selected mod
+        for idx in selection:
+            mod_name = self.mods_listbox.get(idx)
+            
+            # Get clean name and disabled status
+            clean_name = mod_name.split(' (v')[0]
+            # Check stored mod data for disabled status
+            is_disabled = self.mod_data[idx]['disabled'] if idx < len(self.mod_data) else False
+            
+            self._toggle_single_mod(clean_name, is_disabled)
         
-        # Get clean name and disabled status
-        clean_name = mod_name.split(' (v')[0]
-        # Check stored mod data for disabled status
-        idx = selection[0]
-        is_disabled = self.mod_data[idx]['disabled'] if idx < len(self.mod_data) else False
+        # Refresh after all toggles
+        self.refresh_mods_list()
+    
+    def _toggle_single_mod(self, clean_name: str, is_disabled: bool):
+        """Toggle a single mod without refreshing"""
         
         try:
             # Find the actual folder
@@ -728,41 +765,58 @@ class StardewModLoader:
                             # Enable mod (remove .disabled)
                             new_name = folder_name.replace('.disabled', '')
                             item.rename(self.mods_path / new_name)
-                            self.status_var.set(f"Enabled: {clean_name}")
                         else:
                             # Disable mod (add .disabled)
                             new_name = folder_name + '.disabled'
                             item.rename(self.mods_path / new_name)
-                            self.status_var.set(f"Disabled: {clean_name}")
-                        
-                        # Immediately refresh to show color change
-                        self.refresh_mods_list()
                         return
             
-            messagebox.showerror("Error", f"Could not find mod folder: {clean_name}")
+            print(f"Warning: Could not find mod folder: {clean_name}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to toggle mod:\n{str(e)}")
     
     def delete_mod(self):
-        """Delete selected mod"""
+        """Delete selected mod(s)"""
         selection = self.mods_listbox.curselection()
         
         if not selection:
-            messagebox.showwarning("No Selection", "Please select a mod to delete.")
+            messagebox.showwarning("No Selection", "Please select one or more mods to delete.")
             return
         
-        mod_name = self.mods_listbox.get(selection[0])
-        clean_name = mod_name.split(' (v')[0]
+        # Get list of mods to delete
+        mods_to_delete = []
+        for idx in selection:
+            mod_name = self.mods_listbox.get(idx)
+            clean_name = mod_name.split(' (v')[0]
+            mods_to_delete.append(clean_name)
         
         # Confirm deletion
-        result = messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete:\n{clean_name}?\n\nThis cannot be undone."
-        )
+        if len(mods_to_delete) == 1:
+            message = f"Are you sure you want to delete:\n{mods_to_delete[0]}?\n\nThis cannot be undone."
+        else:
+            message = f"Are you sure you want to delete {len(mods_to_delete)} mods?\n\n{', '.join(mods_to_delete[:3])}"
+            if len(mods_to_delete) > 3:
+                message += f"\n...and {len(mods_to_delete) - 3} more"
+            message += "\n\nThis cannot be undone."
+        
+        result = messagebox.askyesno("Confirm Delete", message)
         
         if not result:
             return
+        
+        # Delete each mod
+        deleted_count = 0
+        for clean_name in mods_to_delete:
+            if self._delete_single_mod(clean_name):
+                deleted_count += 1
+        
+        self.status_var.set(f"Deleted {deleted_count} mod(s)")
+        messagebox.showinfo("Deleted", f"Successfully deleted {deleted_count} mod(s)")
+        return
+    
+    def _delete_single_mod(self, clean_name: str) -> bool:
+        """Delete a single mod and return success status"""
         
         try:
             # Find and delete the folder
@@ -784,15 +838,14 @@ class StardewModLoader:
                     
                     if actual_name == clean_name or folder_name.replace('.disabled', '') == clean_name:
                         shutil.rmtree(item)
-                        self.status_var.set(f"Deleted: {clean_name}")
-                        # No need to manually refresh - auto-refresh will handle it
-                        messagebox.showinfo("Deleted", f"Successfully deleted {clean_name}")
-                        return
+                        return True
             
-            messagebox.showerror("Error", f"Could not find mod folder: {clean_name}")
+            print(f"Warning: Could not find mod folder: {clean_name}")
+            return False
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete mod:\n{str(e)}")
+            print(f"Error deleting {clean_name}: {e}")
+            return False
     
     def open_mods_folder(self):
         """Open the mods folder in file explorer"""
@@ -805,6 +858,24 @@ class StardewModLoader:
                 os.system(f'xdg-open "{self.mods_path}"')
         except Exception as e:
             messagebox.showerror("Error", f"Could not open folder:\n{str(e)}")
+    
+    def open_downloads_folder(self):
+        """Open the Downloads folder"""
+        try:
+            downloads_folder = Path.home() / "Downloads"
+            
+            if not downloads_folder.exists():
+                messagebox.showwarning("Not Found", "Downloads folder not found.")
+                return
+            
+            if platform.system() == "Windows":
+                os.startfile(downloads_folder)
+            elif platform.system() == "Darwin":  # macOS
+                os.system(f'open "{downloads_folder}"')
+            else:  # Linux
+                os.system(f'xdg-open "{downloads_folder}"')
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open Downloads folder:\n{str(e)}")
     
     def show_about(self):
         """Show about dialog"""
@@ -875,7 +946,8 @@ class StardewModLoader:
             padx=20,
             pady=8,
             font=('Segoe UI', 9),
-            cursor='hand2'
+            cursor='hand2',
+            highlightthickness=0
         )
         close_btn.pack()
     
