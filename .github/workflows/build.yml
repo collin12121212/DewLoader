@@ -54,7 +54,10 @@ jobs:
     
     - name: Build macOS executable
       run: |
-        pyinstaller --onefile --windowed --name "StardewModLoader" main.py
+        # Build universal binary for both Intel and Apple Silicon
+        pyinstaller --onefile --windowed --name "StardewModLoader" --target-arch universal2 main.py
+      env:
+        ARCHFLAGS: "-arch x86_64 -arch arm64"
     
     - name: Create DMG (optional)
       run: |
