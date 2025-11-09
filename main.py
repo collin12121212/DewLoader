@@ -103,10 +103,15 @@ class StardewModLoader:
             if default_path.exists():
                 return default_path
             
-            # Check Steam path
-            steam_path = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley" / "Mods"
+            # Check Steam path (macOS app bundle structure)
+            steam_path = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley" / "Contents" / "MacOS" / "Mods"
             if steam_path.exists():
                 return steam_path
+            
+            # Fallback: Check old path without Contents/MacOS
+            steam_path_old = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley" / "Mods"
+            if steam_path_old.exists():
+                return steam_path_old
         
         # Return default if nothing found
         return Path.home() / "StardewValley" / "Mods"
@@ -128,9 +133,15 @@ class StardewModLoader:
                     
         elif system == "Darwin":  # macOS
             home = Path.home()
-            steam_path = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley"
+            # macOS app bundle - Mods folder is inside Contents/MacOS/
+            steam_path = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley" / "Contents" / "MacOS"
             if steam_path.exists():
                 return steam_path
+            
+            # Fallback to game root
+            steam_path_root = home / "Library" / "Application Support" / "Steam" / "steamapps" / "common" / "Stardew Valley"
+            if steam_path_root.exists():
+                return steam_path_root
         
         # Fallback to detected mods path parent or home
         mods_path = self.detect_stardew_mods_folder()
@@ -244,31 +255,42 @@ class StardewModLoader:
         
         download_frame.columnconfigure(1, weight=1)
         
-        # Drag and drop section
-        dnd_frame = ttk.LabelFrame(main_frame, text="Install Mod from File", padding="10")
-        dnd_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        # Install mod section
+        install_frame = ttk.LabelFrame(main_frame, text="Install Mod from File", padding="15")
+        install_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        self.drop_zone = tk.Label(
-            dnd_frame,
-            text="Drag & Drop mod files here\n(.zip, .7z, .rar)\n\nOr click Browse to select files",
-            bg=self.bg_tertiary,
-            fg=self.fg_color,
+        # Large browse button
+        browse_btn = tk.Button(
+            install_frame,
+            text="📁 Browse for Mod Files\n(.zip, .7z, .rar)",
+            command=self.browse_files,
+            bg=self.accent_color,
+            fg='white',
+            activebackground=self.highlight_color,
+            activeforeground='white',
             relief=tk.FLAT,
-            borderwidth=2,
-            highlightthickness=2,
-            highlightbackground=self.border_color,
-            highlightcolor=self.accent_color,
-            height=6,
-            font=("Segoe UI", 11)
+            borderwidth=0,
+            padx=40,
+            pady=20,
+            font=('Segoe UI', 12, 'bold'),
+            cursor='hand2'
         )
-        self.drop_zone.pack(fill=tk.BOTH, expand=True, pady=5)
+        browse_btn.pack(fill=tk.BOTH, expand=True)
         
-        # Enable drag and drop
-        self.drop_zone.drop_target_register(DND_FILES)
-        self.drop_zone.dnd_bind('<<Drop>>', self.handle_drop)
+        # Small drop zone for drag-and-drop (hidden feature, if it works)
+        self.drop_zone = tk.Frame(install_frame, bg=self.bg_color, height=1)
+        self.drop_zone.pack(fill=tk.X)
         
-        # Browse button
-        ttk.Button(dnd_frame, text="Browse Files...", command=self.browse_files).pack(pady=(5, 0))
+        # Try to enable drag and drop silently
+        try:
+            self.drop_zone.drop_target_register(DND_FILES)
+            self.drop_zone.dnd_bind('<<Drop>>', self.handle_drop)
+            install_frame.drop_target_register(DND_FILES)
+            install_frame.dnd_bind('<<Drop>>', self.handle_drop)
+            browse_btn.drop_target_register(DND_FILES)
+            browse_btn.dnd_bind('<<Drop>>', self.handle_drop)
+        except:
+            pass  # Silently fail if drag-drop doesn't work
         
         # Installed mods section
         mods_frame = ttk.LabelFrame(main_frame, text="Installed Mods", padding="10")
@@ -391,13 +413,27 @@ class StardewModLoader:
             for file_path in files:
                 self.install_mod(file_path)
     
+    def on_drag_enter(self, event):
+        """Visual feedback when dragging over drop zone"""
+        self.drop_zone.config(bg=self.highlight_color, fg='white')
+    
+    def on_drag_leave(self, event):
+        """Reset visual when dragging leaves drop zone"""
+        self.drop_zone.config(bg=self.bg_tertiary, fg=self.fg_color)
+    
     def handle_drop(self, event):
         """Handle drag and drop events"""
+        # Reset drop zone appearance
+        self.drop_zone.config(bg=self.bg_tertiary, fg=self.fg_color)
+        
+        print(f"Drop event received: {event.data}")  # Debug
         files = self.parse_drop_files(event.data)
         
         for file_path in files:
             if os.path.isfile(file_path):
                 self.install_mod(file_path)
+            else:
+                print(f"Not a file: {file_path}")  # Debug
     
     def parse_drop_files(self, data: str) -> List[str]:
         """Parse dropped file paths (handles spaces and special characters)"""
@@ -433,15 +469,30 @@ class StardewModLoader:
             # Create mods directory if it doesn't exist
             self.mods_path.mkdir(parents=True, exist_ok=True)
             
-            # Extract archive
-            if file_path.suffix.lower() == '.zip':
+            # Detect archive type by extension and magic bytes
+            file_ext = file_path.suffix.lower()
+            
+            # Try to detect by content if extension doesn't match
+            if file_ext not in ['.zip', '.7z', '.rar']:
+                # Read first few bytes to detect file type
+                with open(file_path, 'rb') as f:
+                    magic = f.read(8)
+                    if magic[:2] == b'PK':  # ZIP magic bytes
+                        file_ext = '.zip'
+                    elif magic[:6] == b'Rar!\x1a\x07':  # RAR magic bytes
+                        file_ext = '.rar'
+                    elif magic[:6] == b"7z\xbc\xaf'\x1c":  # 7Z magic bytes
+                        file_ext = '.7z'
+            
+            # Extract based on detected type
+            if file_ext == '.zip':
                 self.extract_zip(file_path)
-            elif file_path.suffix.lower() == '.7z':
+            elif file_ext == '.7z':
                 self.extract_7z(file_path)
-            elif file_path.suffix.lower() == '.rar':
+            elif file_ext == '.rar':
                 self.extract_rar(file_path)
             else:
-                messagebox.showerror("Error", f"Unsupported file format: {file_path.suffix}")
+                messagebox.showerror("Error", f"Unsupported or unrecognized file format.\n\nFile: {file_path.name}\nExtension: {file_path.suffix}")
                 return
             
             self.status_var.set(f"Successfully installed {file_path.name}")
@@ -454,21 +505,30 @@ class StardewModLoader:
     
     def extract_zip(self, file_path: Path):
         """Extract a ZIP archive"""
-        with zipfile.ZipFile(file_path, 'r') as zip_ref:
-            # Check if archive has a manifest.json
-            manifest_found = self.find_manifest_in_archive(zip_ref.namelist())
-            
-            if manifest_found:
-                # Extract to mods directory
-                zip_ref.extractall(self.mods_path)
-            else:
-                messagebox.showwarning(
-                    "Warning",
-                    f"No manifest.json found in {file_path.name}.\n"
-                    "This may not be a valid SMAPI mod.\n\n"
-                    "Extracting anyway..."
-                )
-                zip_ref.extractall(self.mods_path)
+        try:
+            # Try standard zipfile first
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                # Check if archive has a manifest.json
+                manifest_found = self.find_manifest_in_archive(zip_ref.namelist())
+                
+                if manifest_found:
+                    # Extract to mods directory
+                    zip_ref.extractall(self.mods_path)
+                else:
+                    messagebox.showwarning(
+                        "Warning",
+                        f"No manifest.json found in {file_path.name}.\n"
+                        "This may not be a valid SMAPI mod.\n\n"
+                        "Extracting anyway..."
+                    )
+                    zip_ref.extractall(self.mods_path)
+        except zipfile.BadZipFile:
+            # If standard zipfile fails, try rarfile (WinRAR can create zips)
+            try:
+                with rarfile.RarFile(file_path, 'r') as rar_ref:
+                    rar_ref.extractall(self.mods_path)
+            except:
+                raise Exception("Failed to extract ZIP file. File may be corrupted.")
     
     def extract_7z(self, file_path: Path):
         """Extract a 7Z archive"""
